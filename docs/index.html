@@ -20,41 +20,60 @@
 <a href="https://github.com/petamoriken/wasm-webp-test" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
 <script>
 async function instantiate(reqPromise, imports) {
+    let source;
+    // Safari にはまだ WebAssembly.instantiateStreaming が無いためストリーム出来ない
     if (WebAssembly.instantiateStreaming) {
-        return await WebAssembly.instantiateStreaming(reqPromise, imports);
+        source = await WebAssembly.instantiateStreaming(reqPromise, imports);
+    } else {
+        const req = await reqPromise;
+        const buf = await req.arrayBuffer();
+        source = await WebAssembly.instantiate(buf, imports);
     }
-    // Safari には WebAssembly.instantiateStreaming が無いためストリーム出来ない
-    const req = await reqPromise;
-    const buf = await req.arrayBuffer();
-    return await WebAssembly.instantiate(buf, imports);
+    return source.instance;
 }
 
 (async () => {
-    const canvas = document.getElementsByTagName("canvas")[0];
+    const canvas = document.querySelector("canvas");
 
     // WebAssembly のバイトコードの読み込み
-    const exports = (await instantiate(fetch("webpDecoder.wasm"))).instance.exports;
+    const instancePromise = instantiate(fetch("webp-decoder.wasm"));
 
     // WebP の読み込み
-    const res = await fetch(canvas.dataset.src);
-    const buf = await res.arrayBuffer();
+    const bufPromise = (async () => {
+        const res = await fetch(canvas.dataset.src);
+        return await res.arrayBuffer();
+    })();
 
-    // WebAssembly の memory に webp のバッファを書き込む
-    const bufPtr = exports.alloc(buf.byteLength);
-    new Uint8Array(exports.memory.buffer).set(new Uint8Array(buf), bufPtr);
+    const [instance, buf] = await Promise.all([instancePromise, bufPromise]);
+    const exports = instance.exports;
 
-    // WebP をデコードする
-    const sizePtr = exports.alloc(4);
-    const outputBufPtr = exports.decode_webp(bufPtr, buf.byteLength, sizePtr);
+    let size, outputBuf;
+    {
+        const bufPtr = exports.alloc(buf.byteLength);
+        try {
+            // WebAssembly のヒープに webp のバッファを書き込む
+            new Uint8Array(exports.memory.buffer).set(new Uint8Array(buf), bufPtr);
 
-    // デコード結果を受け取る
-    const size = new DataView(exports.memory.buffer).getUint32(sizePtr);
-    const outputBuf = exports.memory.buffer.slice(outputBufPtr, outputBufPtr + size);
+            const sizePtr = exports.alloc(4);
+            try {
+                // WebP をデコードする
+                const outputBufPtr = exports.decode_webp(bufPtr, buf.byteLength, sizePtr);
 
-    // 後処置
-    exports.dealloc_buffer(outputBuf, size);
-    exports.dealloc(sizePtr, 4);
-    exports.dealloc(bufPtr, buf.byteLength);
+                try {
+                    // デコード結果を受け取る
+                    size = new DataView(exports.memory.buffer).getUint32(sizePtr);
+                    outputBuf = exports.memory.buffer.slice(outputBufPtr, outputBufPtr + size);
+
+                } finally {
+                    exports.dealloc_buffer(outputBufPtr, size);
+                }
+            } finally {
+                exports.dealloc(sizePtr, 4);
+            }
+        } finally {
+            exports.dealloc(bufPtr, buf.byteLength);
+        }
+    }
 
     // Canvas に描画する
     const ctx = canvas.getContext("2d");
