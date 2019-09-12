@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>WebAssembly WebP Decoder test</title>
+</head>
+<body>
+<table>
+    <tr>
+        <th>PNG</th>
+        <th>WebP</th>
+        <th>WebP (Canvas)</th>
+    </tr>
+    <tr>
+        <td><img width="320" height="320" src="moriken.png"></td>
+        <td><img width="320" height="320" src="moriken.webp"></td>
+        <td><canvas width="320" height="320" data-src="moriken2.webp"></td>
+    </tr>
+</table>
+<a href="https://github.com/petamoriken/wasm-webp-test" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+<script>
+async function instantiate(reqPromise, imports) {
+    if (WebAssembly.instantiateStreaming) {
+        return await WebAssembly.instantiateStreaming(reqPromise, imports);
+    }
+    // Safari には WebAssembly.instantiateStreaming が無いためストリーム出来ない
+    const req = await reqPromise;
+    const buf = await req.arrayBuffer();
+    return await WebAssembly.instantiate(buf, imports);
+}
+
+(async () => {
+    const canvas = document.getElementsByTagName("canvas")[0];
+
+    // WebAssembly のバイトコードの読み込み
+    const exports = (await instantiate(fetch("webpDecoder.wasm"))).instance.exports;
+
+    // WebP の読み込み
+    const res = await fetch(canvas.dataset.src);
+    const buf = await res.arrayBuffer();
+
+    // WebAssembly の memory に webp のバッファを書き込む
+    const bufPtr = exports.alloc(buf.byteLength);
+    new Uint8Array(exports.memory.buffer).set(new Uint8Array(buf), bufPtr);
+
+    // WebP をデコードする
+    const sizePtr = exports.alloc(4);
+    const outputBufPtr = exports.decode_webp(bufPtr, buf.byteLength, sizePtr);
+
+    // デコード結果を受け取る
+    const size = new DataView(exports.memory.buffer).getUint32(sizePtr);
+    const outputBuf = exports.memory.buffer.slice(outputBufPtr, outputBufPtr + size);
+
+    // 後処置
+    exports.dealloc_buffer(outputBuf, size);
+    exports.dealloc(sizePtr, 4);
+    exports.dealloc(bufPtr, buf.byteLength);
+
+    // Canvas に描画する
+    const ctx = canvas.getContext("2d");
+    const imageData = ctx.createImageData(320, 320);
+    for (const [i, byte] of new Uint8ClampedArray(outputBuf).entries()) {
+        imageData.data[i*4    ] = byte;
+        imageData.data[i*4 + 1] = byte;
+        imageData.data[i*4 + 2] = byte;
+        imageData.data[i*4 + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+})();
+</script>
+</body>
+</html>
