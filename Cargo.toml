@@ -1,0 +1,17 @@
+[package]
+name = "webp-wasm"
+version = "0.1.0"
+authors = ["petamoriken <moriken@kimamass.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wee_alloc = "0.4.5"
+console_error_panic_hook = "0.1.6"
+
+[dependencies.image]
+version = "0.22.2"
+default-features = false
+features = ["webp"]
