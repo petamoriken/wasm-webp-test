@@ -14,24 +14,20 @@ pub unsafe extern fn alloc(size: usize) -> *mut u8 {
 pub unsafe extern fn dealloc(ptr: *mut u8, size: usize) {
     if size == 0 { return }
     let layout = alloc::Layout::from_size_align_unchecked(size, mem::align_of::<usize>());
-    alloc::dealloc(ptr, layout)
+    alloc::dealloc(ptr, layout);
 }
 
 #[no_mangle]
 pub unsafe extern fn decode_webp(input_ptr: *const u8, input_size: usize, output_size: *mut usize) -> *const u8 {
     let input = slice::from_raw_parts(input_ptr, input_size);
     let decoder = WebpDecoder::new(input).unwrap();
-    let mut output: Vec<u8> = decoder.read_image().unwrap();
-
-    output.shrink_to_fit();
+    let output = decoder.read_image().unwrap().into_boxed_slice();
     *output_size = output.len();
-    let output_ptr = output.as_ptr();
-
-    mem::forget(output);
-    output_ptr
+    Box::into_raw(output) as *const u8
 }
 
 #[no_mangle]
 pub unsafe extern fn dealloc_buffer(ptr: *mut u8, size: usize) {
-    drop(Vec::from_raw_parts(ptr, size, size))
+    let s = slice::from_raw_parts_mut(ptr, size);
+    drop(Box::from_raw(s));
 }

@@ -1,5 +1,5 @@
 [package]
-name = "webp-wasm-webp-test"
+name = "wasm-webp-test"
 version = "0.1.0"
 authors = ["petamoriken <moriken@kimamass.com>"]
 edition = "2018"
